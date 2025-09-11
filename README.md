@@ -12,12 +12,23 @@ All 6 development stages have been implemented and tested, providing a fully fun
    ```bash
    python setup.py
    ```
+   - Setup creates default `config/settings.json` and `config/masks.json` only if missing. Existing configs are preserved.
 
 2. **Add Videos:**
    - Copy MP4 files to `media/active/` (motion-triggered videos)
    - Copy MP4 files to `media/ambient/` (default/fallback videos)
 
-3. **Test Stage 1:**
+3. **Run the App:**
+   - Demo mode (no MQTT required; starts ambient playback):
+     ```bash
+     python src/main.py --demo
+     ```
+   - With MQTT broker:
+     ```bash
+     python src/main.py --broker <MQTT_HOST> --port 1883
+     ```
+
+4. **Test Stage 1 (optional):**
    ```bash
    python tests/test_stage1.py
    ```
@@ -100,7 +111,7 @@ media/
 - `P` - Toggle parameter adjustment UI
 - `C` - Test crossfade transition
 - `I` - Show system info in logs
-- `ESC` - Exit application
+- `ESC/Q` - Exit application
 
 **Edit Mode:**
 - `S` - Save mask configuration
