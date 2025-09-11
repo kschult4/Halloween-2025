@@ -169,6 +169,9 @@ class VideoEngine:
         # Set mouse callback for mask editing
         cv2.setMouseCallback(self.window_name, self.mask_manager.handle_mouse_event)
         
+        # Exit signaling for outer app loop
+        self.exit_requested = False
+        
     def scan_media_folder(self, media_path: str) -> List[str]:
         """Scan media folder for MP4 files."""
         video_files = []
@@ -527,6 +530,12 @@ class VideoEngine:
     
     def _handle_application_keys(self, key: int):
         """Handle application-level keyboard commands."""
+        # Handle ESC explicitly
+        if key == 27:
+            self.exit_requested = True
+            logger.info("Exit requested (ESC)")
+            return
+        
         key_char = chr(key & 0xFF).lower()
         
         if key_char == 'p':
@@ -540,6 +549,10 @@ class VideoEngine:
         elif key_char == 'i':
             # Show system info
             self._show_system_info()
+        elif key_char == 'q':
+            # Quit shortcut
+            self.exit_requested = True
+            logger.info("Exit requested (Q)")
     
     def _show_system_info(self):
         """Log current system information."""

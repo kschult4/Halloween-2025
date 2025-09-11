@@ -81,31 +81,24 @@ class HalloweenProjectionMapper:
         logger.info("  E - Toggle edit mode for mask adjustment")
         logger.info("  S - Save mask configuration (in edit mode)")
         logger.info("  R - Reset masks to defaults (in edit mode)")
-        logger.info("  ESC - Exit application")
+        logger.info("  P - Toggle parameter UI | C - Test crossfade | I - Info")
+        logger.info("  ESC/Q - Exit application")
         
         self.is_running = True
         
         try:
             while self.is_running:
-                # Main loop - video engine handles display and input
-                key = cv2.waitKey(100) & 0xFF
-                
-                if key == 27:  # ESC
-                    logger.info("Exit requested by user")
+                # Input is handled inside VideoEngine's rendering thread
+                # Here we only watch for exit signals and window closure
+                if getattr(self.engine, 'exit_requested', False):
+                    logger.info("Exit requested by engine")
                     break
-                elif key != 255:
-                    # Pass key to mask manager
-                    handled = self.engine.mask_manager.handle_keyboard_event(key)
-                    if not handled:
-                        # Handle application-level keys
-                        if key == ord('q'):
-                            logger.info("Quit requested")
-                            break
-                
-                # Check for window close
+
                 if cv2.getWindowProperty(self.engine.window_name, cv2.WND_PROP_VISIBLE) < 1:
                     logger.info("Window closed")
                     break
+
+                time.sleep(0.1)
         
         except KeyboardInterrupt:
             logger.info("Interrupted by user")

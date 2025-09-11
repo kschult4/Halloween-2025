@@ -51,12 +51,15 @@ def create_default_configs():
     "mqtt_timeout_seconds": 60,
     "video_preload_seconds": 2.0
 }"""
+    settings_path = "config/settings.json"
+    if not os.path.exists(settings_path):
+        with open(settings_path, "w") as f:
+            f.write(settings_content)
+        print("Created config/settings.json")
+    else:
+        print("config/settings.json already exists — leaving it unchanged")
     
-    with open("config/settings.json", "w") as f:
-        f.write(settings_content)
-    print("Created config/settings.json")
-    
-    # Default masks (will be overwritten by mask UI)
+    # Default masks (used as initial template; preserved if already present)
     masks_content = """{
     "strips": [
         {"corners": [[0, 0], [1920, 0], [1920, 180], [0, 180]]},
@@ -67,10 +70,13 @@ def create_default_configs():
         {"corners": [[0, 900], [1920, 900], [1920, 1080], [0, 1080]]}
     ]
 }"""
-    
-    with open("config/masks.json", "w") as f:
-        f.write(masks_content)
-    print("Created config/masks.json")
+    masks_path = "config/masks.json"
+    if not os.path.exists(masks_path):
+        with open(masks_path, "w") as f:
+            f.write(masks_content)
+        print("Created config/masks.json")
+    else:
+        print("config/masks.json already exists — leaving it unchanged")
 
 def print_pi_setup_instructions():
     """Print Raspberry Pi specific setup instructions."""
