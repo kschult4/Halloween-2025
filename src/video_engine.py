@@ -66,8 +66,20 @@ class PreloadedVideo:
     
     def _load_metadata_ffpyplayer(self):
         """Load metadata using ffpyplayer."""
-        # Create temporary player to get metadata
-        temp_player = MediaPlayer(self.filepath, ff_opts={'vcodec': 'h264_mmal'})
+        # Create temporary player to get metadata (prefer v4l2m2m, fallback to mmal)
+        temp_player = None
+        for vcodec in ('h264_v4l2m2m', 'h264_mmal', None):
+            try:
+                ff_opts = {'an': True}
+                if vcodec:
+                    ff_opts['vcodec'] = vcodec
+                temp_player = MediaPlayer(self.filepath, ff_opts=ff_opts)
+                break
+            except Exception:
+                temp_player = None
+                continue
+        if temp_player is None:
+            raise RuntimeError("Failed to initialize ffpyplayer for metadata")
         
         # Get first frame to determine dimensions
         frame, val = temp_player.get_frame()
@@ -115,14 +127,19 @@ class PreloadedVideo:
     def create_player(self):
         """Create a new player instance (ffpyplayer or OpenCV)."""
         if HAS_FFPYPLAYER:
-            ff_opts = {
-                'vcodec': 'h264_mmal',  # Hardware decode on Pi
-                'an': True,  # No audio
-            }
-            return MediaPlayer(self.filepath, ff_opts=ff_opts)
-        else:
-            # OpenCV fallback for development
-            return cv2.VideoCapture(self.filepath)
+            # Try modern Pi decoder first, fallback to mmal
+            for vcodec in ('h264_v4l2m2m', 'h264_mmal', None):
+                try:
+                    ff_opts = {'an': True}
+                    if vcodec:
+                        ff_opts['vcodec'] = vcodec
+                    return MediaPlayer(self.filepath, ff_opts=ff_opts)
+                except Exception as e:
+                    logger.debug(f"ffpyplayer init failed with {vcodec}: {e}")
+                    continue
+            logger.warning("ffpyplayer unavailable for playback; falling back to OpenCV")
+        # OpenCV fallback
+        return cv2.VideoCapture(self.filepath)
 
 class VideoEngine:
     """Core video playback engine with preloading and strip processing."""
@@ -201,6 +218,29 @@ class VideoEngine:
         
         # Set fallback ambient video
         self._set_fallback_ambient_video()
+
+    def reload_media(self, media_folders: List[str] = None):
+        """Reload media library from disk and update preloaded videos."""
+        media_folders = media_folders or ['media/active', 'media/ambient']
+        logger.info("Reloading media library...")
+        current = self.current_video
+        new_preloaded: Dict[str, PreloadedVideo] = {}
+        for folder in media_folders:
+            video_files = self.scan_media_folder(folder)
+            for video_path in video_files:
+                video_id = os.path.splitext(os.path.basename(video_path))[0]
+                pre = PreloadedVideo(video_path)
+                pre.load_metadata()
+                if pre.is_loaded:
+                    new_preloaded[video_id] = pre
+        with self.playback_lock:
+            self.preloaded_videos = new_preloaded
+            self._set_fallback_ambient_video()
+            if current and current in self.preloaded_videos:
+                logger.info(f"Current video still available: {current}")
+            else:
+                logger.info("Current video no longer available; falling back to ambient")
+                self._fallback_to_ambient()
     
     def get_available_videos(self) -> List[str]:
         """Get list of available video IDs."""
@@ -553,6 +593,10 @@ class VideoEngine:
             # Quit shortcut
             self.exit_requested = True
             logger.info("Exit requested (Q)")
+        elif key_char == 'l':
+            # Reload media library
+            self.reload_media()
+            logger.info("Media library reloaded")
     
     def _show_system_info(self):
         """Log current system information."""

@@ -20,7 +20,7 @@ class ConfigManager:
         # Default settings
         self.defaults = {
             "crossfade_duration_ms": 200,
-            "state_change_buffer_ms": 1000,
+            "state_change_buffer_ms": 0,
             "mqtt_timeout_seconds": 60,
             "video_preload_seconds": 2.0,
             "loop_enabled": True,

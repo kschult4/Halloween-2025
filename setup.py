@@ -47,7 +47,7 @@ def create_default_configs():
     # Default settings
     settings_content = """{
     "crossfade_duration_ms": 200,
-    "state_change_buffer_ms": 1000,
+    "state_change_buffer_ms": 0,
     "mqtt_timeout_seconds": 60,
     "video_preload_seconds": 2.0
 }"""
@@ -98,7 +98,7 @@ To enable hardware H.264 decoding, ensure these packages are installed:
     sudo apt install libavcodec-dev libavformat-dev libswscale-dev
 
 For auto-start on boot, create a systemd service:
-    sudo cp halloween-projection.service /etc/systemd/system/
+    sudo cp systemd/halloween-projection.service /etc/systemd/system/
     sudo systemctl enable halloween-projection.service
 """)
 

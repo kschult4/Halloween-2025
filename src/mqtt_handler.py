@@ -64,6 +64,11 @@ class MQTTHandler:
             
             # Connect to broker
             logger.info(f"Connecting to MQTT broker at {self.broker_host}:{self.broker_port}")
+            # Configure automatic reconnect backoff if available
+            try:
+                self.client.reconnect_delay_set(min_delay=1, max_delay=30)
+            except Exception:
+                pass
             self.client.connect(self.broker_host, self.broker_port, 60)
             
             # Start networking loop
@@ -122,6 +127,17 @@ class MQTTHandler:
             logger.warning(f"Unexpected MQTT disconnection (code {rc})")
         else:
             logger.info("MQTT disconnected")
+        # Start background reconnect attempts
+        if self.client:
+            try:
+                try:
+                    self.client.reconnect_delay_set(min_delay=1, max_delay=30)
+                except Exception:
+                    pass
+                t = threading.Thread(target=self._attempt_reconnect_loop, daemon=True)
+                t.start()
+            except Exception as e:
+                logger.debug(f"Failed to start reconnect loop: {e}")
     
     def _on_message(self, client, userdata, msg):
         """Callback for received MQTT messages."""
@@ -133,9 +149,14 @@ class MQTTHandler:
             # Parse JSON payload
             data = json.loads(payload)
             
-            # Extract state and media
-            state = data.get('state', 'ambient')
-            media = data.get('media', None)
+            # Ignore status/heartbeat-only messages (no control state)
+            if 'state' not in data:
+                logger.debug("Ignoring MQTT payload without 'state' field")
+                return
+            
+            # Extract state and media (support 'animation' alias)
+            state = data.get('state')
+            media = data.get('media') or data.get('animation')
             
             # Validate state
             if state not in ['active', 'ambient']:
@@ -157,6 +178,19 @@ class MQTTHandler:
             logger.error(f"Invalid JSON in MQTT message: {e}")
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}")
+
+    def _attempt_reconnect_loop(self):
+        """Attempt reconnect with exponential backoff until connected or client cleared."""
+        delay = 1
+        max_delay = 30
+        while self.client and not self.is_connected:
+            try:
+                logger.info("Attempting MQTT reconnect...")
+                self.client.reconnect()
+            except Exception as e:
+                logger.debug(f"Reconnect failed: {e}")
+            time.sleep(delay)
+            delay = min(max_delay, delay * 2)
     
     def _start_timeout_monitoring(self):
         """Start thread to monitor MQTT message timeout."""

@@ -190,11 +190,29 @@ class MaskManager:
         """Apply all masks to create masked output for projection."""
         if not self.masks:
             return frame
-        
-        # For now, return the full frame
-        # In final implementation, this would apply perspective transforms
-        # and return the properly masked/warped output
-        return frame
+        try:
+            h, w = frame.shape[:2]
+            output = np.zeros_like(frame)
+            transforms = self.get_projection_transforms()
+            
+            for i, transform in enumerate(transforms):
+                # Warp the full frame using the strip-specific transform
+                warped = cv2.warpPerspective(frame, transform, (w, h))
+                
+                # Create mask for destination quadrilateral
+                dst_points = np.array(self.masks[i].get_corner_positions(), dtype=np.int32).reshape((-1, 1, 2))
+                mask = np.zeros((h, w), dtype=np.uint8)
+                cv2.fillPoly(mask, [dst_points], 255)
+                
+                # Composite warped strip into output using the mask
+                roi = output.copy()
+                roi[mask == 255] = warped[mask == 255]
+                output = roi
+            
+            return output
+        except Exception as e:
+            logger.error(f"Error applying masks to frame: {e}")
+            return frame
     
     def draw_edit_overlay(self, image: np.ndarray):
         """Draw editing overlay with all masks and controls."""

@@ -104,6 +104,18 @@ media/
 - `config/settings.json` - Global playback parameters
 - `config/masks.json` - Projection mask coordinates
 
+### MQTT
+
+- Topic: `halloween/playback`
+- Control payload:
+  ```json
+  { "state": "active", "media": "active_07" }
+  ```
+- Compatibility:
+  - Accepts `animation` as an alias for `media` (e.g., `{ "state": "active", "animation": "active_04" }`).
+  - Heartbeat/status messages without `state` (e.g., `{ "status": "online", "timestamp": 1697060000 }`) are ignored by the player.
+  - Default sync: crossfade 200 ms on Pi; ESP32 should add ~250 ms buffer before publishing to align LEDs and video.
+
 ### Keyboard Controls
 
 **Main Application:**
@@ -111,6 +123,7 @@ media/
 - `P` - Toggle parameter adjustment UI
 - `C` - Test crossfade transition
 - `I` - Show system info in logs
+- `L` - Reload media library from `media/active` and `media/ambient`
 - `ESC/Q` - Exit application
 
 **Edit Mode:**
