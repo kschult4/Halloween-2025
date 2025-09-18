@@ -167,6 +167,29 @@ python tools/encode_video.py --batch      # Encode all videos
 python tools/encode_video.py --info video.mp4  # Show video details
 ```
 
+**WLED Bridge:**
+```bash
+# Bridge WLED preset changes to the Pi's playback topic
+python tools/mqtt_wled_bridge.py \
+  --broker <MQTT_HOST> --port 1883 \
+  --wled-device <DEVICE_NAME> \
+  --wled-host <WLED_IP> \
+  --publish-topic halloween/playback \
+  --start-after-ms 250 -v
+
+# Optional: provide a mapping JSON to override name→state/media
+# {
+#   "by_slot": { "1": {"media": "active_01", "state": "active"} },
+#   "by_name": { "ambient_01": {"media": "ambient_01", "state": "ambient"} }
+# }
+python tools/mqtt_wled_bridge.py --broker <MQTT_HOST> --wled-device <DEVICE> --mapping config/wled_bridge.json
+```
+
+Notes:
+- The bridge subscribes to `wled/<DEVICE_NAME>/state` and republishes to `halloween/playback` with `{ "state": "active|ambient", "media": "<id>", "start_after_ms": 250 }`.
+- If `--wled-host` is provided, the bridge fetches `http://<WLED_IP>/presets.json` to map preset slot→name. Names starting with `ambient_` are treated as ambient; others default to active.
+- You can override categorization and IDs via the optional mapping file.
+
 ## Raspberry Pi Setup
 
 Add to `/boot/config.txt`:
