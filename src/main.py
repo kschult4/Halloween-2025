@@ -70,7 +70,7 @@ class HalloweenProjectionMapper:
             if connect_mqtt:
                 mqtt_connected = self.engine.connect_mqtt()
                 if mqtt_connected:
-                    logger.info("MQTT connection established - ready for ESP32 commands")
+                    logger.info("MQTT connection established - ready for controller commands")
                 else:
                     logger.warning("MQTT connection failed - running in standalone mode")
             else:

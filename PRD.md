@@ -9,9 +9,9 @@ Date: September 11, 2025
 Develop a lightweight projection-mapping playback application for a Halloween display. The system consists of:
 
 - A Raspberry Pi 4 or newer running a projection mapping app for 6 horizontal bars (stairs).
-- An ESP32 running WLED, controlling a 3×3 grid of 16×16 LED panels as a single 48×48 matrix.
+- A dedicated LED animation controller (custom firmware or automation service) driving a 3×3 grid of 16×16 LED panels as a single 48×48 matrix.
 
-WLED handles LED effects and preset management on the ESP32. A PIR sensor connected to the ESP32 (via WLED GPIO/usermod) triggers preset changes. The Pi listens for preset/state changes via MQTT and plays the corresponding videos, ensuring projection and LEDs remain synchronized. The Pi app allows field adjustment of projection alignment and basic playback parameters.
+The animation controller publishes playback states via MQTT. A PIR sensor or other trigger connected to that controller drives state transitions. The Pi listens for state/media selections over MQTT and plays the corresponding videos, ensuring projection and LEDs remain synchronized. The Pi app allows field adjustment of projection alignment and basic playback parameters.
 
 2. Target Users / Personas
 
@@ -25,19 +25,19 @@ Existing projection-mapping software is either overkill, unstable on Raspberry P
 
 - Plays pre-defined videos mapped to physical steps or surfaces.
 - Responds instantly to motion detection.
-- Plays videos synchronized with LED animations controlled by an ESP32.
+- Plays videos synchronized with LED animations controlled by an external animation controller.
 - Allows field adjustment of projection alignment.
 
 4. Goals
 
 - Stable, low-latency playback on Raspberry Pi 4+.
-- Motion-triggered, ESP32-driven interaction using MQTT.
+- Motion-triggered interaction using MQTT from an external controller.
 - Intuitive mask/geometry adjustment in the field.
 - Seamless video looping and state-based playback for engaging displays.
 - Quick visual transitions (200 ms crossfade) between ambient and active states.
 - Adjustable basic playback parameters (crossfade length, buffer before state change).
 - Pi-friendly video encoding via helper script.
-- ESP32 fully automated; LEDs and Pi synchronized.
+- Controller fully automated; LEDs and Pi synchronized.
 
 5. Features / Functionality
 
@@ -64,12 +64,12 @@ Behavior:
 
 - If media exists: start playback immediately (<250 ms latency).
 - If media does not exist: fallback to looping an ambient video.
-- If MQTT messages are missing (ESP32 offline): loop an ambient video.
-- Pi does not randomly select videos; selection is done by WLED presets on the ESP32.
+- If MQTT messages are missing (controller offline): loop an ambient video.
+- By default, the Pi follows explicit media selections from the controller; optional local selection can be enabled when the controller only publishes state.
 
-WLED integration options:
-- Direct: Pi subscribes to WLED's MQTT JSON state topic (e.g., wled/<device>/state) and maps preset changes (by preset ID or name) to `media` IDs.
-- Bridged: A small MQTT bridge (broker rule or helper script) republishes WLED preset changes to `halloween/playback` with the payload above for maximal compatibility with the Pi app.
+Controller integration options:
+- Direct: controller publishes playback commands to `halloween/playback` using the standard payload.
+- Bridged: a lightweight adapter (broker rule or helper script) can translate third-party topics (e.g., legacy WLED preset updates) into the standardized payload for maximal compatibility.
 
 5.3 Masking / Alignment
 
@@ -117,59 +117,57 @@ Edit mode:
 
 5.8 MQTT Synchronization
 
-- Pi subscribes to `halloween/playback` (or maps from WLED state topic).
-- Plays exactly the media instructed by WLED preset selection.
+- Pi subscribes to `halloween/playback` (or uses a bridge to adapt controller-specific topics).
+- Plays exactly the media instructed by the external controller when provided.
 - Ensures LEDs and projection remain synchronized.
 - Target: start playback <250 ms after receiving message.
-- To align with the Pi’s 200 ms crossfade, Pi applies a configurable start buffer (e.g., 250 ms) after detecting a WLED preset change before switching videos.
+- To align with the Pi’s 200 ms crossfade, Pi applies a configurable start buffer (e.g., 250 ms) after detecting a controller state change before switching videos.
 
-6. ESP32 / LED System Requirements (WLED workflow)
+6. LED System Requirements (external controller workflow)
 
 6.1 Hardware & Peripherals
 
-- ESP32 microcontroller running WLED (current stable release).
-- Single PIR presence sensor wired to a WLED-supported GPIO (via built-in `Sensor/PIR` option or a usermod/automation).
-- 3×3 LED grid (16×16 panels), treated as one contiguous 48×48 surface using WLED’s 2D matrix/segment configuration (tile orientation/serpentine handled in WLED).
+- A microcontroller or server-based animation controller capable of driving the LED matrix.
+- Single PIR presence sensor (or equivalent trigger) wired to the controller.
+- 3×3 LED grid (16×16 panels) addressed as one contiguous 48×48 surface by the controller (tile orientation/serpentine handled upstream).
 
-6.2 Presets & Playlists (Animations)
+6.2 Animation Library
 
-- Animations are prototyped in WLED presets (parameterized built-in effects and palettes) optionally organized into playlists.
-- WLED cannot directly drive the final LED load; presets act as design references that are recreated in the custom firmware/assistant-driven renderer at the required LED count.
+- Animations are stored on/served by the controller (custom renderer, DMX server, etc.). WLED can still be used as a prototyping tool, but production playback is handled elsewhere.
+- Recommended naming convention mirrors video IDs so the Pi and controller stay aligned (`ambient_01`, `active_07`, etc.).
 
 Categories and naming:
 - Ambient presets (~3): names/prefix `ambient_01`, `ambient_02`, ...
 - Active presets (~12): names/prefix `active_01`, `active_02`, ...
 
 Mapping to Pi videos:
-- The Pi maps incoming preset identifier to a video by matching the preset name or a configured mapping table to the `media` ID (e.g., `active_07`). The corresponding LED animation is rebuilt outside WLED based on the shared preset name and palette (e.g., “Ghostrider” with “Faded Reef”).
-- Presets loop in WLED until state changes.
+- The Pi maps incoming animation identifiers to video IDs (e.g., `active_07`). The LED animation controller plays the matching effect based on the shared identifier and palette information.
+- Animations loop on the controller until state changes.
 
 6.3 Motion Detection & State
 
-- PIR sensor triggers preset changes in WLED (via WLED sensor integration/usermod/automation).
-- Debounce/cooldowns configured in WLED or via simple automation logic:
+- PIR sensor (or equivalent trigger) initiates state changes on the controller.
+- Debounce/cooldowns configured in the controller or automation layer:
   - Minimum active duration (e.g., 5–10 s)
   - Retrigger cooldown (e.g., ignore motion for 2–3 s)
   - Ambient return delay (e.g., 10–20 s after last motion)
 - Fully automatic; no manual overrides required in the field.
-- On power cycle: WLED resumes; default preset is an ambient preset.
+- On power cycle: controller resumes in a safe ambient state.
 - Fail silently on sensor or animation errors.
 
 6.4 MQTT Communication
 
-- WLED MQTT is enabled. Two integration approaches are supported:
-  1) Pi subscribes to WLED’s JSON state topic (e.g., `wled/<device>/state`) and reacts to preset changes.
-  2) A lightweight bridge republishes preset changes to `halloween/playback` with payload `{ "state": "active|ambient", "media": "<preset_name>" }` (alias: `animation`).
+- Controller publishes MQTT messages directly to `halloween/playback`, or a lightweight bridge adapts the controller’s native format to the standard payload `{ "state": "active|ambient", "media": "<id>" }` (alias: `animation`).
 - Single publish/notification per state change is sufficient; Pi tolerates duplicates.
-- Optional ESP32 heartbeat/status can be forwarded to a status topic (e.g., `halloween/esp32/status`): `{ "status":"online", "timestamp":<unix_epoch> }`.
+- Optional controller heartbeat/status can be forwarded to a status topic (e.g., `halloween/controller/status`): `{ "status":"online", "timestamp":<unix_epoch> }`.
 - Open local Wi‑Fi; no encryption/auth for this project scope.
-- Automatic Wi‑Fi & MQTT reconnection per WLED.
+- Automatic Wi‑Fi & MQTT reconnection handled by the controller platform.
 
 6.5 Synchronization
 
-- Pi applies a configurable start buffer (default 250 ms) after detecting a preset change before switching videos to align with the Pi’s 200 ms crossfade and WLED effect onset.
-- If Pi connection is lost, WLED continues its own presets/playlists.
-- Preset selection strategy: random initial ambient; active presets cycle sequentially or randomly per WLED playlist/automation.
+- Pi applies a configurable start buffer (default 250 ms) after detecting a controller state change before switching videos to align with the Pi’s 200 ms crossfade and LED effect onset.
+- If Pi connection is lost, the controller continues its own animation playlists.
+- Selection strategy: random initial ambient; active animations cycle sequentially or randomly per controller logic.
 
 7. User Stories
 
@@ -178,7 +176,7 @@ Mapping to Pi videos:
 - Video/LED loops until state changes.
 - Projection mask adjustable via corner dragging.
 - Projection and LEDs stay synchronized.
-- ESP32 handles animation selection and Pi follows.
+- External controller handles animation selection and Pi follows.
 - Edit UI allows crossfade/buffer adjustments.
 - Easy video encoding for Pi playback.
 
@@ -207,21 +205,21 @@ Raspberry Pi-compatible app:
 - Drag-and-drop corner adjustment UI
 - Keyboard toggle for edit/playback mode
 - Adjustable crossfade & buffer (global)
-- MQTT-triggered video switching (Pi follows ESP32)
+- MQTT-triggered video switching (Pi follows controller)
 - Config/mask persistence
 - Helper script for video encoding
 
-ESP32 (WLED) configuration:
+Controller integration:
 
-- WLED configured for a 48×48 matrix (3×3 of 16×16 panels) with correct tiling/orientation.
-- Presets/playlists created and named to match Pi `media` IDs (e.g., `ambient_01`, `active_07`).
-- PIR integration (sensor/usermod/automation) to trigger preset changes.
-- MQTT enabled; either Pi subscribes to WLED state or a simple bridge republishes to `halloween/playback`.
+- Controller configured for a 48×48 matrix (3×3 of 16×16 panels) with correct tiling/orientation.
+- Animation identifiers aligned with Pi `media` IDs (e.g., `ambient_01`, `active_07`).
+- Sensor integration (PIR or equivalent) to trigger state changes.
+- MQTT publishing directly to `halloween/playback` or via a bridge.
 - Optional heartbeat/status forwarding.
 
 Documentation:
 
-- Installation guide (Pi + WLED)
+- Installation guide (Pi + controller)
 - Media folder structure and preset naming conventions
 - Mask adjustment & playback parameter guide
-- WLED-to-Pi mapping/bridge instructions (topics, payloads, examples)
+- Bridge instructions for adapting third-party controllers (e.g., legacy WLED topics)

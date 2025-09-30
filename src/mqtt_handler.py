@@ -1,6 +1,6 @@
 """
 MQTT handler for Halloween Projection Mapper.
-Manages ESP32 communication and state-based video switching.
+Manages controller communication and state-based video switching.
 """
 import json
 import threading
@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MQTTHandler:
-    """Handles MQTT communication with ESP32 for state and media control."""
+    """Handles MQTT communication with the upstream controller for state/media control."""
     
     def __init__(self, 
                  broker_host: str = "localhost",
@@ -266,7 +266,7 @@ class MQTTHandler:
             return False
 
 class MQTTSimulator:
-    """Simulates ESP32 MQTT messages for testing."""
+    """Simulates controller MQTT messages for testing."""
     
     def __init__(self, 
                  broker_host: str = "localhost",
@@ -283,7 +283,7 @@ class MQTTSimulator:
         """Connect simulator to MQTT broker."""
         try:
             self.client = mqtt.Client(
-                client_id="halloween_esp32_simulator",
+                client_id="halloween_controller_simulator",
                 protocol=mqtt.MQTTv311
             )
             
@@ -317,17 +317,17 @@ class MQTTSimulator:
         """Simulator connection callback."""
         if rc == 0:
             self.is_connected = True
-            logger.info("ESP32 simulator connected")
+            logger.info("Controller simulator connected")
         else:
             logger.error(f"Simulator connection failed: {rc}")
     
     def _on_disconnect(self, client, userdata, rc):
         """Simulator disconnection callback."""
         self.is_connected = False
-        logger.info("ESP32 simulator disconnected")
+        logger.info("Controller simulator disconnected")
     
     def send_message(self, state: str, media: Optional[str] = None) -> bool:
-        """Send a message as ESP32 would."""
+        """Send a message in the same format as the production controller."""
         if not self.is_connected or not self.client:
             logger.error("Simulator not connected")
             return False

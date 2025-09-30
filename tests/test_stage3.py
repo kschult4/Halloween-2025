@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Stage 3 Test Script - MQTT Integration Verification
-Tests ESP32 communication, state switching, and timeout fallback.
+Tests controller communication, state switching, and timeout fallback.
 """
 import sys
 import os
@@ -315,7 +315,7 @@ def main():
         if all(test_results):
             print("\n✅ Stage 3 tests PASSED - MQTT integration ready!")
             print("\nFeatures verified:")
-            print("  - ESP32 MQTT communication via 'halloween/playback' topic")
+            print("  - Controller MQTT communication via 'halloween/playback' topic")
             print("  - State-based video switching (active/ambient)")
             print("  - 60-second timeout fallback to ambient")
             print("  - Sub-250ms response time capability")

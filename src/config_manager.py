@@ -26,6 +26,8 @@ class ConfigManager:
             "loop_enabled": True,
             "hardware_acceleration": True,
             "display_fps": 30,
+            "local_media_selection_enabled": False,
+            "local_media_strategy": "round_robin",
         }
         
         # Load existing settings or create defaults
@@ -101,7 +103,29 @@ class ConfigManager:
         """Set MQTT timeout in seconds."""
         value = max(10, min(value, 300))  # Clamp between 10-300 seconds
         self.set("mqtt_timeout_seconds", value)
-    
+
+    def is_local_media_selection_enabled(self) -> bool:
+        """Return True if local media selection should be used when media IDs are missing."""
+        return bool(self.get("local_media_selection_enabled", False))
+
+    def set_local_media_selection_enabled(self, enabled: bool):
+        """Enable or disable local media selection fallback."""
+        self.set("local_media_selection_enabled", bool(enabled))
+
+    def get_local_media_strategy(self) -> str:
+        """Get strategy for choosing local media (round_robin, random, first)."""
+        value = str(self.get("local_media_strategy", "round_robin"))
+        if value not in {"round_robin", "random", "first"}:
+            value = "round_robin"
+            self.set("local_media_strategy", value)
+        return value
+
+    def set_local_media_strategy(self, strategy: str):
+        """Set local media selection strategy."""
+        if strategy not in {"round_robin", "random", "first"}:
+            raise ValueError("local_media_strategy must be one of: round_robin, random, first")
+        self.set("local_media_strategy", strategy)
+
     def adjust_crossfade_duration(self, delta_ms: int):
         """Adjust crossfade duration by delta amount."""
         current = self.get_crossfade_duration_ms()

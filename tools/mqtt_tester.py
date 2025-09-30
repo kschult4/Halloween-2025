@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MQTT Tester for Halloween Projection Mapper
-Simulates ESP32 MQTT messages for testing projection system.
+Simulates controller MQTT messages for testing projection system.
 """
 import sys
 import os

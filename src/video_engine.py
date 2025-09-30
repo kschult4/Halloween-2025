@@ -6,6 +6,7 @@ import os
 import threading
 import time
 import logging
+import random
 from typing import Dict, Optional, Tuple, List, Any
 import cv2
 import numpy as np
@@ -41,7 +42,7 @@ class VideoStrip:
 
 class PreloadedVideo:
     """Container for preloaded video data and metadata."""
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, category: Optional[str] = None):
         self.filepath = filepath
         self.player: Optional[MediaPlayer] = None
         self.cv_capture: Optional[cv2.VideoCapture] = None
@@ -52,6 +53,8 @@ class PreloadedVideo:
         self.strips: List[VideoStrip] = []
         self.is_loaded = False
         self.use_opencv = not HAS_FFPYPLAYER
+        # category reflects folder-driven state classification ("active" or "ambient")
+        self.category = category
         
     def load_metadata(self):
         """Load video metadata and prepare strips."""
@@ -192,6 +195,7 @@ class VideoEngine:
         # Exit signaling for outer app loop
         self.exit_requested = False
         self.idle_message: Optional[str] = None
+        self._local_media_indices = {"active": 0, "ambient": 0}
         
     def scan_media_folder(self, media_path: str) -> List[str]:
         """Scan media folder for MP4 files."""
@@ -210,8 +214,9 @@ class VideoEngine:
             video_files = self.scan_media_folder(folder)
             for video_path in video_files:
                 video_id = os.path.splitext(os.path.basename(video_path))[0]
-                
-                preloaded = PreloadedVideo(video_path)
+                category = self._infer_category_from_path(video_path)
+
+                preloaded = PreloadedVideo(video_path, category=category)
                 preloaded.load_metadata()
                 
                 if preloaded.is_loaded:
@@ -222,6 +227,7 @@ class VideoEngine:
         
         # Set fallback ambient video
         self._set_fallback_ambient_video()
+        self._reset_local_media_indices()
 
     def reload_media(self, media_folders: List[str] = None):
         """Reload media library from disk and update preloaded videos."""
@@ -233,13 +239,15 @@ class VideoEngine:
             video_files = self.scan_media_folder(folder)
             for video_path in video_files:
                 video_id = os.path.splitext(os.path.basename(video_path))[0]
-                pre = PreloadedVideo(video_path)
+                category = self._infer_category_from_path(video_path)
+                pre = PreloadedVideo(video_path, category=category)
                 pre.load_metadata()
                 if pre.is_loaded:
                     new_preloaded[video_id] = pre
         with self.playback_lock:
             self.preloaded_videos = new_preloaded
             self._set_fallback_ambient_video()
+            self._reset_local_media_indices()
             if current and current in self.preloaded_videos:
                 logger.info(f"Current video still available: {current}")
             else:
@@ -249,11 +257,54 @@ class VideoEngine:
     def get_available_videos(self) -> List[str]:
         """Get list of available video IDs."""
         return list(self.preloaded_videos.keys())
-    
+
+    def _infer_category_from_path(self, video_path: str) -> Optional[str]:
+        """Infer logical category (active/ambient) from file path."""
+        parent = os.path.basename(os.path.dirname(video_path)).lower()
+        if parent in ("active", "ambient"):
+            return parent
+        return None
+
+    def _reset_local_media_indices(self):
+        """Reset round-robin indices after media reload."""
+        self._local_media_indices = {"active": 0, "ambient": 0}
+
+    def _collect_media_ids_by_category(self, category: str) -> List[str]:
+        """Collect preloaded media IDs that match the given category."""
+        matches = [vid_id for vid_id, pre in self.preloaded_videos.items() if pre.category == category]
+        if not matches:
+            # Fallback to legacy naming convention if categories are missing
+            prefix = f"{category}_"
+            matches = [vid_id for vid_id in self.preloaded_videos.keys() if vid_id.startswith(prefix)]
+        return sorted(matches)
+
+    def _pick_local_media(self, state: str) -> Optional[str]:
+        """Select a local media ID based on configured strategy."""
+        if not self.config_manager.is_local_media_selection_enabled():
+            return None
+
+        pool = self._collect_media_ids_by_category(state)
+        if not pool:
+            return None
+
+        strategy = self.config_manager.get_local_media_strategy()
+
+        if strategy == "random":
+            return random.choice(pool)
+
+        if strategy == "round_robin":
+            idx = self._local_media_indices.get(state, 0)
+            choice = pool[idx % len(pool)]
+            self._local_media_indices[state] = (idx + 1) % len(pool)
+            return choice
+
+        # Default/fallback strategy: first item
+        return pool[0]
+
     def _set_fallback_ambient_video(self):
         """Set a fallback ambient video for when MQTT is offline or media not found."""
-        # Look for ambient videos
-        ambient_videos = [vid for vid in self.preloaded_videos.keys() if vid.startswith('ambient')]
+        # Look for ambient videos based on category or naming convention
+        ambient_videos = self._collect_media_ids_by_category('ambient')
         if ambient_videos:
             self.fallback_ambient_video = ambient_videos[0]
             logger.info(f"Set fallback ambient video: {self.fallback_ambient_video}")
@@ -265,7 +316,7 @@ class VideoEngine:
                 logger.warning(f"No ambient videos found, using fallback: {self.fallback_ambient_video}")
     
     def _handle_mqtt_message(self, state: str, media: Optional[str]):
-        """Handle incoming MQTT state/media messages from ESP32."""
+        """Handle incoming MQTT state/media messages from the controller."""
         logger.info(f"MQTT message received: state={state}, media={media}")
         
         self.current_state = state
@@ -300,34 +351,45 @@ class VideoEngine:
     
     def _resolve_target_video(self, state: str, media: Optional[str]) -> Optional[str]:
         """Resolve the target video based on state and media ID."""
-        if state == "active" and media:
-            # Try exact media match first
-            if media in self.preloaded_videos:
-                return media
-            
-            # Try with active prefix if not already present
-            if not media.startswith('active_'):
-                prefixed_media = f"active_{media}"
-                if prefixed_media in self.preloaded_videos:
-                    return prefixed_media
-            
-            logger.warning(f"Requested media '{media}' not found")
+        if state == "active":
+            if media:
+                # Try exact media match first
+                if media in self.preloaded_videos:
+                    return media
+
+                # Try with active prefix if not already present
+                if not media.startswith('active_'):
+                    prefixed_media = f"active_{media}"
+                    if prefixed_media in self.preloaded_videos:
+                        return prefixed_media
+
+                logger.warning(f"Requested media '{media}' not found")
+
+            local_choice = self._pick_local_media('active')
+            if local_choice:
+                logger.info(f"Local media selection chose '{local_choice}' for active state")
+                return local_choice
             return None
-            
-        elif state == "ambient":
+
+        if state == "ambient":
             # For ambient state, prefer specified media or use fallback
             if media and media in self.preloaded_videos:
                 return media
-            
+
             # Try with ambient prefix
             if media and not media.startswith('ambient_'):
                 prefixed_media = f"ambient_{media}"
                 if prefixed_media in self.preloaded_videos:
                     return prefixed_media
-            
+
+            local_choice = self._pick_local_media('ambient')
+            if local_choice:
+                logger.info(f"Local media selection chose '{local_choice}' for ambient state")
+                return local_choice
+
             # Use fallback ambient video
             return self.fallback_ambient_video
-        
+
         return None
     
     def _fallback_to_ambient(self):
@@ -341,12 +403,12 @@ class VideoEngine:
                 self.start_idle_display("Add MP4 videos to media/ambient for fallback")
     
     def connect_mqtt(self) -> bool:
-        """Connect to MQTT broker for ESP32 communication."""
+        """Connect to MQTT broker for controller communication."""
         logger.info("Connecting to MQTT broker...")
         success = self.mqtt_handler.connect()
         
         if success:
-            logger.info("MQTT connection established - ready for ESP32 commands")
+            logger.info("MQTT connection established - ready for controller commands")
         else:
             logger.error("MQTT connection failed - will use fallback ambient video")
             self._fallback_to_ambient()

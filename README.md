@@ -50,7 +50,7 @@ All 6 development stages have been implemented and tested, providing a fully fun
 - Keyboard controls (E: edit mode, S: save, R: reset)
 
 ### ✅ Stage 3: MQTT Integration (COMPLETED)
-- ESP32 communication via `halloween/playback` topic
+- Animation controller communication via `halloween/playback` topic
 - State-based video switching (active/ambient)
 - 60-second timeout fallback to ambient
 - Sub-250ms response time to MQTT messages
@@ -104,12 +104,13 @@ media/
 - `config/settings.json` - Global playback parameters
 - `config/masks.json` - Projection mask coordinates
 - Default state-change buffer is 250 ms to keep video and LEDs synchronized out of the box
+- Set `local_media_selection_enabled` to `true` when the upstream controller only publishes `state`; the Pi will pick a local clip using `local_media_strategy` (`round_robin` | `random` | `first`).
 
 ### LED Animation Workflow
 
-- Prototype effects in WLED to pick presets and color palettes (e.g., “Ghostrider” with palette “Faded Reef”).
-- Share the chosen preset name and palette with the assistant-driven renderer; the final animation is rebuilt to target the full LED matrix size since WLED cannot directly drive the complete load.
-- Keep preset names aligned with Pi media IDs so the projection player and rebuilt LED animations stay synchronized.
+- Prototype effects in your preferred LED animation toolkit (custom renderer, simulator, etc.). WLED can still be used for concepting, but it is no longer part of the production signal chain.
+- Register the animation identifiers with the upstream controller so it can publish `{ "state": "...", "media": "..." }` messages that align with Pi video IDs.
+- Keep identifiers consistent across controller, LED renderer, and the Pi media library to maintain tight synchronization.
 
 ### MQTT
 
@@ -121,7 +122,7 @@ media/
 - Compatibility:
   - Accepts `animation` as an alias for `media` (e.g., `{ "state": "active", "animation": "active_04" }`).
   - Heartbeat/status messages without `state` (e.g., `{ "status": "online", "timestamp": 1697060000 }`) are ignored by the player.
-  - Default sync: crossfade 200 ms on Pi; ESP32 should add ~250 ms buffer before publishing to align LEDs and video.
+- Default sync: crossfade 200 ms on Pi; upstream controller should add ~250 ms buffer before publishing to align LEDs and video.
 
 ### Keyboard Controls
 
@@ -164,7 +165,7 @@ python tools/mask_editor.py   # Interactive mask adjustment tool
 
 **MQTT Tester:**
 ```bash
-python tools/mqtt_tester.py   # Test ESP32 communication
+python tools/mqtt_tester.py   # Test controller communication
 ```
 
 **Video Encoder:**
@@ -174,9 +175,9 @@ python tools/encode_video.py --batch      # Encode all videos
 python tools/encode_video.py --info video.mp4  # Show video details
 ```
 
-**WLED Bridge:**
+**Legacy WLED Bridge (optional):**
 ```bash
-# Bridge WLED preset changes to the Pi's playback topic
+# (Optional) Legacy WLED bridge for teams still prototyping presets in WLED
 python tools/mqtt_wled_bridge.py \
   --broker <MQTT_HOST> --port 1883 \
   --wled-device <DEVICE_NAME> \
@@ -184,16 +185,12 @@ python tools/mqtt_wled_bridge.py \
   --publish-topic halloween/playback \
   --start-after-ms 250 -v
 
-# Optional: provide a mapping JSON to override name→state/media
-# {
-#   "by_slot": { "1": {"media": "active_01", "state": "active"} },
-#   "by_name": { "ambient_01": {"media": "ambient_01", "state": "ambient"} }
-# }
+# Override name→state/media mapping when bridging from WLED
 python tools/mqtt_wled_bridge.py --broker <MQTT_HOST> --wled-device <DEVICE> --mapping config/wled_bridge.json
 ```
 
 Notes:
-- The bridge subscribes to `wled/<DEVICE_NAME>/state` and republishes to `halloween/playback` with `{ "state": "active|ambient", "media": "<id>", "start_after_ms": 250 }`.
+- The optional bridge listens to `wled/<DEVICE_NAME>/state` and republishes standardized playback payloads. It is provided for compatibility only and is not required for the production controller.
 - If `--wled-host` is provided, the bridge fetches `http://<WLED_IP>/presets.json` to map preset slot→name. Names starting with `ambient_` are treated as ambient; others default to active.
 - You can override categorization and IDs via the optional mapping file.
 
