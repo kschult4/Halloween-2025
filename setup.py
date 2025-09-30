@@ -19,13 +19,26 @@ def install_dependencies():
     """Install required Python packages."""
     print("Installing Python dependencies...")
     
+    success = True
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
         print("Dependencies installed successfully")
-        return True
     except subprocess.CalledProcessError as e:
         print(f"Failed to install dependencies: {e}")
-        return False
+        success = False
+
+    pi_requirements = os.path.join(os.path.dirname(__file__), "requirements-pi.txt")
+    if success and os.path.exists(pi_requirements) and sys.platform.startswith("linux"):
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", pi_requirements])
+            print("Raspberry Pi specific dependencies installed successfully")
+        except subprocess.CalledProcessError as e:
+            print(
+                "Warning: Could not install Raspberry Pi specific dependencies automatically. "
+                "Install ffpyplayer manually if you need hardware acceleration.")
+            print(f"Reason: {e}")
+
+    return success
 
 def create_media_folders():
     """Create required media folder structure."""
@@ -47,7 +60,7 @@ def create_default_configs():
     # Default settings
     settings_content = """{
     "crossfade_duration_ms": 200,
-    "state_change_buffer_ms": 0,
+    "state_change_buffer_ms": 250,
     "mqtt_timeout_seconds": 60,
     "video_preload_seconds": 2.0
 }"""

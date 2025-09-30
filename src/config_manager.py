@@ -20,7 +20,7 @@ class ConfigManager:
         # Default settings
         self.defaults = {
             "crossfade_duration_ms": 200,
-            "state_change_buffer_ms": 0,
+            "state_change_buffer_ms": 250,
             "mqtt_timeout_seconds": 60,
             "video_preload_seconds": 2.0,
             "loop_enabled": True,
@@ -86,7 +86,7 @@ class ConfigManager:
     
     def get_state_change_buffer_ms(self) -> int:
         """Get state change buffer in milliseconds."""
-        return self.get("state_change_buffer_ms", 1000)
+        return self.get("state_change_buffer_ms", 250)
     
     def set_state_change_buffer_ms(self, value: int):
         """Set state change buffer in milliseconds."""

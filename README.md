@@ -103,6 +103,13 @@ media/
 
 - `config/settings.json` - Global playback parameters
 - `config/masks.json` - Projection mask coordinates
+- Default state-change buffer is 250 ms to keep video and LEDs synchronized out of the box
+
+### LED Animation Workflow
+
+- Prototype effects in WLED to pick presets and color palettes (e.g., “Ghostrider” with palette “Faded Reef”).
+- Share the chosen preset name and palette with the assistant-driven renderer; the final animation is rebuilt to target the full LED matrix size since WLED cannot directly drive the complete load.
+- Keep preset names aligned with Pi media IDs so the projection player and rebuilt LED animations stay synchronized.
 
 ### MQTT
 

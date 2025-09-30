@@ -1,19 +1,17 @@
-[
-Unit]
+[Unit]
 Description=Halloween Projection Mapper
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-# Update User and paths to match your environment
+# Change the user below if the repository lives under a different account
 User=pi
-WorkingDirectory=/home/pi/Halloween-2025/Halloween-2025
-ExecStart=/usr/bin/env python3 src/main.py --broker localhost
+WorkingDirectory=%h/Halloween-2025/Halloween-2025
+ExecStart=/usr/bin/env python3 %h/Halloween-2025/Halloween-2025/src/main.py --broker localhost
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-

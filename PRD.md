@@ -133,15 +133,15 @@ Edit mode:
 
 6.2 Presets & Playlists (Animations)
 
-- Animations are WLED presets (parameterized built-in effects and palettes) optionally organized into playlists.
-- Presets are the source of truth for LED content; no custom LED firmware.
+- Animations are prototyped in WLED presets (parameterized built-in effects and palettes) optionally organized into playlists.
+- WLED cannot directly drive the final LED load; presets act as design references that are recreated in the custom firmware/assistant-driven renderer at the required LED count.
 
 Categories and naming:
 - Ambient presets (~3): names/prefix `ambient_01`, `ambient_02`, ...
 - Active presets (~12): names/prefix `active_01`, `active_02`, ...
 
 Mapping to Pi videos:
-- The Pi maps incoming preset identifier to a video by matching the preset name or a configured mapping table to the `media` ID (e.g., `active_07`).
+- The Pi maps incoming preset identifier to a video by matching the preset name or a configured mapping table to the `media` ID (e.g., `active_07`). The corresponding LED animation is rebuilt outside WLED based on the shared preset name and palette (e.g., “Ghostrider” with “Faded Reef”).
 - Presets loop in WLED until state changes.
 
 6.3 Motion Detection & State

@@ -15,7 +15,6 @@ import cv2
 sys.path.append(os.path.dirname(__file__))
 
 from video_engine import VideoEngine
-from mqtt_handler import MQTTSimulator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,14 +30,23 @@ class HalloweenProjectionMapper:
         self.mqtt_port = mqtt_port
         self.engine: Optional[VideoEngine] = None
         self.is_running = False
+        self.headless = False
+        self._connect_mqtt = True
         
-    def initialize(self) -> bool:
+    def initialize(self, *, connect_mqtt: bool = True, allow_empty_media: bool = False,
+                   headless: bool = False) -> bool:
         """Initialize the projection system."""
         try:
             logger.info("Initializing Halloween Projection Mapper...")
+            self.headless = headless
+            self._connect_mqtt = connect_mqtt
             
             # Create video engine
-            self.engine = VideoEngine(mqtt_broker=self.mqtt_broker, mqtt_port=self.mqtt_port)
+            self.engine = VideoEngine(
+                mqtt_broker=self.mqtt_broker,
+                mqtt_port=self.mqtt_port,
+                headless=headless
+            )
             
             # Preload videos
             media_folders = ['media/active', 'media/ambient']
@@ -46,21 +54,30 @@ class HalloweenProjectionMapper:
             
             available_videos = self.engine.get_available_videos()
             if not available_videos:
-                logger.error("No videos found in media folders!")
+                message = "No videos found in media folders"
+                logger.warning(f"{message}!")
                 logger.info("Add MP4 files to media/active/ and media/ambient/")
-                return False
+                if not allow_empty_media:
+                    return False
+                if not headless:
+                    self.engine.start_idle_display(
+                        "Add MP4 videos to media/active or media/ambient"
+                    )
             
             logger.info(f"Loaded {len(available_videos)} videos: {available_videos}")
             
             # Connect to MQTT broker
-            mqtt_connected = self.engine.connect_mqtt()
-            if mqtt_connected:
-                logger.info("MQTT connection established - ready for ESP32 commands")
+            if connect_mqtt:
+                mqtt_connected = self.engine.connect_mqtt()
+                if mqtt_connected:
+                    logger.info("MQTT connection established - ready for ESP32 commands")
+                else:
+                    logger.warning("MQTT connection failed - running in standalone mode")
             else:
-                logger.warning("MQTT connection failed - running in standalone mode")
+                logger.info("Skipping MQTT connection (demo/status mode)")
             
             # Start with ambient video
-            if self.engine.fallback_ambient_video:
+            if not headless and self.engine.fallback_ambient_video:
                 self.engine.start_playback(self.engine.fallback_ambient_video)
                 logger.info(f"Started ambient playback: {self.engine.fallback_ambient_video}")
             
@@ -74,6 +91,10 @@ class HalloweenProjectionMapper:
         """Run the main application loop."""
         if not self.engine:
             logger.error("Engine not initialized")
+            return
+
+        if self.engine.headless:
+            logger.info("Headless mode active — skipping interactive run loop")
             return
         
         logger.info("Halloween Projection Mapper running...")
@@ -114,7 +135,8 @@ class HalloweenProjectionMapper:
             self.engine.cleanup()
             self.engine = None
         
-        cv2.destroyAllWindows()
+        if not self.headless:
+            cv2.destroyAllWindows()
         self.is_running = False
         logger.info("Cleanup complete")
     
@@ -172,51 +194,41 @@ Examples:
     return parser
 
 def run_demo_mode(app: HalloweenProjectionMapper):
-    """Run application in demo mode with MQTT simulator."""
-    logger.info("Starting demo mode with MQTT simulator...")
-    
-    # Create MQTT simulator
-    simulator = MQTTSimulator(app.mqtt_broker, app.mqtt_port)
-    
-    try:
-        if simulator.connect():
-            logger.info("MQTT simulator connected - will send demo messages")
-            
-            # Start demo sequence in separate thread
-            import threading
-            
-            def demo_sequence():
-                time.sleep(3)  # Let system start up
-                
-                demo_messages = [
-                    ("ambient", "ambient_01", 3),
-                    ("active", "active_01", 4),
-                    ("ambient", None, 2),
-                    ("active", "test_ambient", 3),
-                    ("ambient", "ambient_01", 5),
-                ]
-                
-                for state, media, duration in demo_messages:
-                    if not app.is_running:
-                        break
-                    
-                    logger.info(f"Demo: {state} / {media} for {duration}s")
-                    simulator.send_message(state, media)
-                    time.sleep(duration)
-                
-                logger.info("Demo sequence complete")
-            
-            demo_thread = threading.Thread(target=demo_sequence, daemon=True)
-            demo_thread.start()
-        
-        else:
-            logger.warning("MQTT simulator failed to connect")
-        
-        # Run normal application
-        app.run()
-        
-    finally:
-        simulator.disconnect()
+    """Run application in demo mode with simulated MQTT messages."""
+    if not app.engine:
+        logger.error("Demo mode requested before initialization")
+        return
+
+    logger.info("Starting demo mode with internal MQTT simulation")
+
+    import threading
+
+    def demo_sequence():
+        time.sleep(3)  # Let system start up
+
+        demo_messages = [
+            ("ambient", "ambient_01", 3),
+            ("active", "active_01", 4),
+            ("ambient", None, 2),
+            ("active", "active_02", 3),
+            ("ambient", "ambient_01", 5),
+        ]
+
+        for state, media, duration in demo_messages:
+            if not app.is_running:
+                break
+
+            logger.info(f"Demo: {state} / {media} for {duration}s")
+            app.engine.simulate_state_change(state, media)
+            time.sleep(duration)
+
+        logger.info("Demo sequence complete")
+
+    demo_thread = threading.Thread(target=demo_sequence, daemon=True)
+    demo_thread.start()
+
+    # Run normal application
+    app.run()
 
 def main():
     """Main application entry point."""
@@ -229,10 +241,15 @@ def main():
     
     # Create application
     app = HalloweenProjectionMapper(mqtt_broker=args.broker, mqtt_port=args.port)
-    
+
     try:
         # Initialize system
-        if not app.initialize():
+        init_success = app.initialize(
+            connect_mqtt=not args.demo and not args.status,
+            allow_empty_media=True,
+            headless=args.status
+        )
+        if not init_success:
             logger.error("Failed to initialize system")
             return 1
         
@@ -242,7 +259,7 @@ def main():
             import json
             print(json.dumps(status, indent=2))
             return 0
-        
+
         # Run application
         if args.demo:
             run_demo_mode(app)

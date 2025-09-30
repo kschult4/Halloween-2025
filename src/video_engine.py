@@ -144,7 +144,8 @@ class PreloadedVideo:
 class VideoEngine:
     """Core video playback engine with preloading and strip processing."""
     
-    def __init__(self, mqtt_broker: str = "localhost", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "localhost", mqtt_port: int = 1883,
+                 headless: bool = False):
         self.preloaded_videos: Dict[str, PreloadedVideo] = {}
         self.current_video: Optional[str] = None
         self.current_player: Optional[MediaPlayer] = None
@@ -157,6 +158,7 @@ class VideoEngine:
         self.current_state = "ambient"
         self.fallback_ambient_video = None
         self.last_frame: Optional[np.ndarray] = None
+        self.headless = headless
         
         # Error handling and monitoring
         self.error_handler = ErrorHandler()
@@ -181,13 +183,15 @@ class VideoEngine:
         
         # Display window
         self.window_name = "Halloween Projection"
-        cv2.namedWindow(self.window_name, cv2.WINDOW_FULLSCREEN)
-        
-        # Set mouse callback for mask editing
-        cv2.setMouseCallback(self.window_name, self.mask_manager.handle_mouse_event)
+        if not self.headless:
+            cv2.namedWindow(self.window_name, cv2.WINDOW_FULLSCREEN)
+            
+            # Set mouse callback for mask editing
+            cv2.setMouseCallback(self.window_name, self.mask_manager.handle_mouse_event)
         
         # Exit signaling for outer app loop
         self.exit_requested = False
+        self.idle_message: Optional[str] = None
         
     def scan_media_folder(self, media_path: str) -> List[str]:
         """Scan media folder for MP4 files."""
@@ -333,6 +337,8 @@ class VideoEngine:
             self.start_playback(self.fallback_ambient_video)
         else:
             logger.error("No fallback ambient video available")
+            if not self.headless:
+                self.start_idle_display("Add MP4 videos to media/ambient for fallback")
     
     def connect_mqtt(self) -> bool:
         """Connect to MQTT broker for ESP32 communication."""
@@ -419,6 +425,7 @@ class VideoEngine:
             self.playback_thread.join(timeout=1.0)
             
         self.current_video = None
+        self.idle_message = None
     
     def _playback_loop(self):
         """Main playback loop with looping support."""
@@ -509,28 +516,36 @@ class VideoEngine:
     
     def _display_strips(self, frame: np.ndarray, strips: List[VideoStrip]):
         """Display video strips with masking, crossfade, and overlays."""
+        self._render_frame(frame, apply_masks=True)
+
+    def _render_frame(self, frame: np.ndarray, *, apply_masks: bool):
+        """Render a single frame with overlays and optional masking."""
         # Store current frame for potential crossfade
         self.last_frame = frame.copy()
-        
+
+        display_frame = frame.copy()
+
         # Apply crossfade if active
         if self.crossfade_manager.is_active():
-            frame = self.crossfade_manager.update_crossfade(frame)
-        
-        # Apply masks for projection (in final implementation)
-        display_frame = self.mask_manager.apply_masks_to_frame(frame.copy())
-        
-        # Add editing overlay if in edit mode
+            display_frame = self.crossfade_manager.update_crossfade(display_frame)
+
+        # Optional masking
+        if apply_masks:
+            display_frame = self.mask_manager.apply_masks_to_frame(display_frame)
+
+        # Add overlays
         self.mask_manager.draw_edit_overlay(display_frame)
-        
-        # Add parameter adjustment UI if enabled
         self.parameter_ui.draw_ui(display_frame)
-        
+
         # Add crossfade progress indicator
         if self.crossfade_manager.is_active():
             self._draw_crossfade_indicator(display_frame)
-        
+
+        if self.headless:
+            return
+
         cv2.imshow(self.window_name, display_frame)
-        
+
         # Handle keyboard input
         key = cv2.waitKey(1) & 0xFF
         if key != 255:  # Key was pressed
@@ -620,12 +635,69 @@ class VideoEngine:
             if hasattr(self, 'error_handler'):
                 self.error_handler.stop_monitoring()
             
-            cv2.destroyAllWindows()
+            if not self.headless:
+                cv2.destroyAllWindows()
             logger.info("Video engine cleanup completed")
             
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
             # Don't use error handler during cleanup to avoid loops
+
+    def start_idle_display(self, message: str):
+        """Start a simple idle display when no media is available."""
+        if self.headless:
+            return
+
+        with self.playback_lock:
+            self.stop_playback()
+            self.current_video = "_idle"
+            self.current_state = "ambient"
+            self.is_playing = True
+            self.idle_message = message
+            self.playback_thread = threading.Thread(target=self._idle_loop, daemon=True)
+            self.playback_thread.start()
+
+    def _idle_loop(self):
+        """Display loop for idle state messaging."""
+        frame_time = 1.0 / 30.0
+
+        while self.is_playing and self.current_video == "_idle":
+            frame = self._build_idle_frame()
+            self._render_frame(frame, apply_masks=False)
+            time.sleep(frame_time)
+
+    def _build_idle_frame(self) -> np.ndarray:
+        """Create a frame instructing the user to add media files."""
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        # Subtle gradient background for readability
+        gradient = np.linspace(20, 60, frame.shape[0], dtype=np.uint8)
+        frame[:] = gradient[:, None, None]
+
+        message_lines = [
+            "No media found",
+            self.idle_message or "Add MP4 videos to media/active or media/ambient",
+            "Press 'E' to adjust masks or 'L' after adding media"
+        ]
+
+        y_start = 400
+        for idx, text in enumerate(message_lines):
+            cv2.putText(
+                frame,
+                text,
+                (160, y_start + idx * 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.4,
+                (255, 255, 255),
+                3
+            )
+
+        return frame
+
+    def simulate_state_change(self, state: str, media: Optional[str] = None):
+        """Directly simulate an MQTT state change (demo/testing)."""
+        logger.debug(f"Simulating state change: state={state}, media={media}")
+        self._handle_mqtt_message(state, media)
 
 # Test functions for Stage 1 verification
 def test_video_engine():

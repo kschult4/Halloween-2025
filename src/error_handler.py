@@ -135,11 +135,9 @@ class FallbackManager:
             ]
             
             for action in fallback_actions:
-                logger.info(f"Video fallback action: {action}")
-                # In real implementation, would attempt each action
-                # and return True on first success
-            
-            return True
+                logger.info(f"Video fallback action planned: {action}")
+            logger.info("Video playback fallback not yet implemented; manual intervention required")
+            return False
             
         except Exception as e:
             logger.error(f"Video playback fallback failed: {e}")
@@ -163,9 +161,9 @@ class FallbackManager:
             ]
             
             for action in fallback_actions:
-                logger.info(f"MQTT fallback action: {action}")
-            
-            return True
+                logger.info(f"MQTT fallback action planned: {action}")
+            logger.info("MQTT fallback not yet implemented; manual intervention required")
+            return False
             
         except Exception as e:
             logger.error(f"MQTT fallback failed: {e}")
@@ -188,9 +186,9 @@ class FallbackManager:
             ]
             
             for action in fallback_actions:
-                logger.info(f"Mask fallback action: {action}")
-            
-            return True
+                logger.info(f"Mask fallback action planned: {action}")
+            logger.info("Mask fallback not yet implemented; manual intervention required")
+            return False
             
         except Exception as e:
             logger.error(f"Mask system fallback failed: {e}")
@@ -213,9 +211,9 @@ class FallbackManager:
             ]
             
             for action in fallback_actions:
-                logger.info(f"Configuration fallback action: {action}")
-            
-            return True
+                logger.info(f"Configuration fallback action planned: {action}")
+            logger.info("Configuration fallback not yet implemented; manual intervention required")
+            return False
             
         except Exception as e:
             logger.error(f"Configuration fallback failed: {e}")
@@ -238,9 +236,9 @@ class FallbackManager:
             ]
             
             for action in fallback_actions:
-                logger.info(f"Display fallback action: {action}")
-            
-            return True
+                logger.info(f"Display fallback action planned: {action}")
+            logger.info("Display fallback not yet implemented; manual intervention required")
+            return False
             
         except Exception as e:
             logger.error(f"Display fallback failed: {e}")
