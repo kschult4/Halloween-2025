@@ -100,6 +100,7 @@ class HalloweenProjectionMapper:
         logger.info("Halloween Projection Mapper running...")
         logger.info("Controls:")
         logger.info("  E - Toggle edit mode for mask adjustment")
+        logger.info("  W - Switch between four-corner and width crop modes (edit)")
         logger.info("  S - Save mask configuration (in edit mode)")
         logger.info("  R - Reset masks to defaults (in edit mode)")
         logger.info("  P - Toggle parameter UI | C - Test crossfade | I - Info")

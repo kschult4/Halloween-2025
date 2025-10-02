@@ -125,13 +125,60 @@ def test_keyboard_handling():
     print("✅ Keyboard handling test passed")
     return True
 
+
+def test_width_mode_crop():
+    """Test toggling and adjusting width crop mode."""
+    print("\n=== Testing Width Crop Mode ===")
+
+    manager = MaskManager()
+
+    # Enable edit mode and switch to width crop
+    manager.handle_keyboard_event(ord('e'))
+    assert manager.is_editing, "Edit mode should be enabled"
+
+    handled = manager.handle_keyboard_event(ord('w'))
+    assert handled, "Should handle 'w' key in edit mode"
+    assert manager.edit_mode == 'width', "Should switch to width mode"
+
+    # Capture initial left/right positions
+    left_handle, right_handle = manager._get_width_handle_positions(manager.last_overlay_height)
+    initial_width = right_handle[0] - left_handle[0]
+    assert initial_width > 0, "Initial width should be positive"
+
+    # Drag left handle inward by 80 pixels
+    drag_target_x = left_handle[0] + 80
+    manager.handle_mouse_event(cv2.EVENT_LBUTTONDOWN, left_handle[0], left_handle[1], 0, None)
+    manager.handle_mouse_event(cv2.EVENT_MOUSEMOVE, drag_target_x, left_handle[1], 0, None)
+    manager.handle_mouse_event(cv2.EVENT_LBUTTONUP, drag_target_x, left_handle[1], 0, None)
+
+    # Ensure all masks updated symmetrically
+    for mask in manager.masks:
+        corners = mask.get_corner_positions()
+        assert corners[0][0] == corners[3][0], "Left edge should remain vertical"
+        assert corners[1][0] == corners[2][0], "Right edge should remain vertical"
+
+    new_left_handle, new_right_handle = manager._get_width_handle_positions(manager.last_overlay_height)
+    new_width = new_right_handle[0] - new_left_handle[0]
+    assert new_width < initial_width, "Width should decrease after inward drag"
+
+    # Switch back to corner mode and ensure width remains
+    manager.handle_keyboard_event(ord('w'))
+    assert manager.edit_mode == 'corners', "Should return to corner mode"
+
+    corners_after = manager.masks[0].get_corner_positions()
+    assert corners_after[0][0] == new_left_handle[0], "Width adjustment should persist when returning to corners"
+
+    print("✅ Width crop mode test passed")
+    return True
+
 def test_visual_mask_editing():
     """Interactive test for visual mask editing."""
     print("\n=== Visual Mask Editing Test ===")
     print("This test opens a visual window for mask editing.")
     print("Controls:")
     print("  - Press 'E' to toggle edit mode")
-    print("  - Drag corners to adjust masks")
+    print("  - Press 'W' to switch between four-corner and width crop modes")
+    print("  - Drag corners (corner mode) or width handles (width mode)")
     print("  - Press 'S' to save configuration")
     print("  - Press 'R' to reset to defaults")
     print("  - Press ESC to exit test")
@@ -218,12 +265,14 @@ def main():
     
     try:
         # Unit tests
-        test_results = [
+        unit_tests = [
             test_mask_creation(),
             test_mask_persistence(),
             test_corner_detection(),
             test_keyboard_handling(),
+            test_width_mode_crop(),
         ]
+        test_results = unit_tests.copy()
         
         # Interactive tests
         print("\n" + "=" * 50)
@@ -240,7 +289,7 @@ def main():
         
         # Results
         print("\n=== Test Results ===")
-        print(f"Unit tests: {'PASS' if all(test_results[:4]) else 'FAIL'}")
+        print(f"Unit tests: {'PASS' if all(unit_tests) else 'FAIL'}")
         
         if all(test_results):
             print("\n✅ Stage 2 tests PASSED - Mask system ready!")
@@ -250,6 +299,7 @@ def main():
             print("  - Persistent mask configuration")
             print("  - Edit mode toggle (E key)")
             print("  - Save (S key) and reset (R key) functionality")
+            print("  - Width crop mode for uniform trimming (W key)")
             print("  - Visual overlay and interaction")
             return True
         else:

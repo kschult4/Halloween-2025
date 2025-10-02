@@ -70,29 +70,30 @@ class StripMask:
         points = np.array(self.get_corner_positions(), dtype=np.int32)
         return points.reshape((-1, 1, 2))
     
-    def draw_mask(self, image: np.ndarray, alpha: float = 0.3):
+    def draw_mask(self, image: np.ndarray, alpha: float = 0.3, *, show_corners: bool = True):
         """Draw mask overlay on image."""
         # Create mask overlay
         overlay = image.copy()
         points = self.get_mask_points()
         cv2.fillPoly(overlay, [points], self.color)
-        
+
         # Blend with original image
         cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
-        
+
         # Draw outline
         cv2.polylines(image, [points], True, self.color, 2)
-        
+
         # Draw corners
-        for i, corner in enumerate(self.corners):
-            color = (255, 255, 255) if corner.is_dragging else (200, 200, 200)
-            cv2.circle(image, corner.position, corner.radius, color, -1)
-            cv2.circle(image, corner.position, corner.radius, (0, 0, 0), 2)
-            
-            # Corner number
-            cv2.putText(image, str(i), 
-                       (corner.x - 5, corner.y + 5), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        if show_corners:
+            for i, corner in enumerate(self.corners):
+                color = (255, 255, 255) if corner.is_dragging else (200, 200, 200)
+                cv2.circle(image, corner.position, corner.radius, color, -1)
+                cv2.circle(image, corner.position, corner.radius, (0, 0, 0), 2)
+                
+                # Corner number
+                cv2.putText(image, str(i), 
+                           (corner.x - 5, corner.y + 5), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
 class MaskManager:
     """Manages all strip masks and provides editing interface."""
@@ -102,16 +103,26 @@ class MaskManager:
         self.masks: List[StripMask] = []
         self.selected_corner: Optional[Corner] = None
         self.is_editing = False
+        self.edit_mode = 'corners'  # 'corners' or 'width'
         
         # Mouse state
         self.mouse_dragging = False
         self.last_mouse_pos = (0, 0)
+        self.active_width_handle: Optional[str] = None  # 'left', 'right'
+        self.last_overlay_height = 1080
         
         # Default mask configuration for 1920x1080 divided into 6 strips
         self.default_masks = self._create_default_masks()
         
         # Load existing masks or create defaults
         self.load_masks()
+
+        # Width mode configuration
+        self.width_mode_center = None
+        self.width_mode_half_width = None
+        self.width_mode_min_width = 200  # pixels
+        self.width_mode_handle_radius = 25
+        self.canvas_width = self._compute_canvas_width()
     
     def _create_default_masks(self) -> List[Dict]:
         """Create default mask configuration for 6 horizontal strips."""
@@ -218,11 +229,13 @@ class MaskManager:
         """Draw editing overlay with all masks and controls."""
         if not self.is_editing:
             return
-        
+
+        self.last_overlay_height = image.shape[0]
+
         # Draw all masks
         for mask in self.masks:
-            mask.draw_mask(image, alpha=0.2)
-        
+            mask.draw_mask(image, alpha=0.2, show_corners=self.edit_mode == 'corners')
+
         # Draw strip labels
         for i, mask in enumerate(self.masks):
             # Calculate center of mask for label
@@ -238,44 +251,67 @@ class MaskManager:
         # Instructions
         instructions = [
             "EDIT MODE - Press 'E' to toggle",
-            "Drag corners to adjust masks",
+            "Press 'W' to switch corner/width mode",
             "Press 'S' to save configuration",
             "Press 'R' to reset to defaults"
         ]
         
+        mode_line = "Mode: Four Corners"
+        if self.edit_mode == 'width':
+            mode_line = "Mode: Width Crop (drag handles to adjust)"
+        else:
+            instructions.insert(1, "Drag corners to adjust masks")
+        instructions.insert(1, mode_line)
+
         for i, instruction in enumerate(instructions):
             cv2.putText(image, instruction, (10, 30 + i * 25), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-    
+
+        if self.edit_mode == 'width':
+            self._draw_width_mode_controls(image)
+
     def handle_mouse_event(self, event: int, x: int, y: int, flags: int, param):
         """Handle mouse events for drag-and-drop corner adjustment."""
         if not self.is_editing:
             return
-        
-        if event == cv2.EVENT_LBUTTONDOWN:
-            # Find corner under mouse
-            self.selected_corner = None
-            for mask in self.masks:
-                corner = mask.find_corner_at_point(x, y)
-                if corner:
-                    self.selected_corner = corner
-                    corner.is_dragging = True
-                    self.mouse_dragging = True
-                    break
-        
-        elif event == cv2.EVENT_MOUSEMOVE:
-            if self.mouse_dragging and self.selected_corner:
-                # Move selected corner
-                self.selected_corner.move_to(x, y)
-        
-        elif event == cv2.EVENT_LBUTTONUP:
-            if self.selected_corner:
-                self.selected_corner.is_dragging = False
+
+        if self.edit_mode == 'corners':
+            if event == cv2.EVENT_LBUTTONDOWN:
+                # Find corner under mouse
                 self.selected_corner = None
-            self.mouse_dragging = False
-        
+                for mask in self.masks:
+                    corner = mask.find_corner_at_point(x, y)
+                    if corner:
+                        self.selected_corner = corner
+                        corner.is_dragging = True
+                        self.mouse_dragging = True
+                        break
+            
+            elif event == cv2.EVENT_MOUSEMOVE:
+                if self.mouse_dragging and self.selected_corner:
+                    # Move selected corner
+                    self.selected_corner.move_to(x, y)
+            
+            elif event == cv2.EVENT_LBUTTONUP:
+                if self.selected_corner:
+                    self.selected_corner.is_dragging = False
+                    self.selected_corner = None
+                self.mouse_dragging = False
+        else:
+            if event == cv2.EVENT_LBUTTONDOWN:
+                handle = self._find_width_handle_at_point(x, y)
+                if handle:
+                    self.active_width_handle = handle
+                    self.mouse_dragging = True
+            elif event == cv2.EVENT_MOUSEMOVE:
+                if self.mouse_dragging and self.active_width_handle:
+                    self._update_width_crop_from_drag(x)
+            elif event == cv2.EVENT_LBUTTONUP:
+                self.active_width_handle = None
+                self.mouse_dragging = False
+
         self.last_mouse_pos = (x, y)
-    
+
     def handle_keyboard_event(self, key: int) -> bool:
         """Handle keyboard events. Returns True if event was handled."""
         key_char = chr(key & 0xFF).lower()
@@ -283,17 +319,27 @@ class MaskManager:
         if key_char == 'e':
             # Toggle edit mode
             self.is_editing = not self.is_editing
+            if not self.is_editing:
+                self.active_width_handle = None
+                self.selected_corner = None
             logger.info(f"Edit mode: {'ON' if self.is_editing else 'OFF'}")
             return True
-        
+
+        elif key_char == 'w' and self.is_editing:
+            self._toggle_edit_mode()
+            return True
+
         elif key_char == 's' and self.is_editing:
             # Save masks
             self.save_masks()
             return True
-        
+
         elif key_char == 'r' and self.is_editing:
             # Reset to defaults
             self.masks = [StripMask(i, mask['corners']) for i, mask in enumerate(self.default_masks)]
+            self.canvas_width = self._compute_canvas_width()
+            if self.edit_mode == 'width':
+                self._initialize_width_mode()
             logger.info("Reset masks to defaults")
             return True
         
@@ -324,6 +370,170 @@ class MaskManager:
             transforms.append(transform)
         
         return transforms
+
+    def _compute_canvas_width(self) -> int:
+        """Compute the maximum X extent across all masks or defaults."""
+        try:
+            mask_x = [corner[0]
+                      for mask in (self.masks or [])
+                      for corner in mask.get_corner_positions()]
+            default_x = [corner[0]
+                         for mask in self.default_masks
+                         for corner in mask['corners']]
+            candidates = mask_x + default_x
+            width = max(candidates) if candidates else 1920
+            return max(int(width), 1)
+        except Exception:
+            return 1920
+
+    def _toggle_edit_mode(self):
+        """Switch between corner and width editing modes."""
+        if self.edit_mode == 'corners':
+            self._initialize_width_mode()
+            self.edit_mode = 'width'
+            self.selected_corner = None
+            logger.info("Mask edit mode: WIDTH")
+        else:
+            self.edit_mode = 'corners'
+            self.active_width_handle = None
+            self.selected_corner = None
+            logger.info("Mask edit mode: CORNERS")
+
+    def _initialize_width_mode(self):
+        """Prepare width mode parameters based on current mask geometry."""
+        self.canvas_width = self._compute_canvas_width()
+        center, half_width = self._compute_width_params_from_masks()
+        self.width_mode_center = center
+        self.width_mode_half_width = half_width
+        self._apply_width_crop_to_masks()
+
+    def _compute_width_params_from_masks(self) -> Tuple[float, float]:
+        """Determine center and half-width from current masks."""
+        if not self.masks:
+            default_center = self._compute_canvas_width() / 2.0
+            default_half = default_center
+            return default_center, default_half
+
+        first_corners = self.masks[0].get_corner_positions()
+        left_avg = (first_corners[0][0] + first_corners[3][0]) / 2.0
+        right_avg = (first_corners[1][0] + first_corners[2][0]) / 2.0
+
+        center = (left_avg + right_avg) / 2.0
+        half_width = max((right_avg - left_avg) / 2.0, 1.0)
+
+        max_half = min(center, self.canvas_width - center)
+        min_half = min(self.width_mode_min_width / 2.0, max_half)
+        if max_half <= 0:
+            return center, 1.0
+        half_width = max(min(half_width, max_half), min_half)
+
+        return center, half_width
+
+    def _apply_width_crop_to_masks(self):
+        """Apply the current width crop symmetrically to all masks."""
+        if self.width_mode_center is None or self.width_mode_half_width is None:
+            return
+
+        max_half = min(self.width_mode_center, self.canvas_width - self.width_mode_center)
+        if max_half <= 0:
+            return
+        min_half = min(self.width_mode_min_width / 2.0, max_half)
+        half_width = max(min(self.width_mode_half_width, max_half), min_half)
+        self.width_mode_half_width = half_width
+
+        left_x = int(round(self.width_mode_center - half_width))
+        right_x = int(round(self.width_mode_center + half_width))
+
+        left_x = max(0, left_x)
+        right_x = min(self.canvas_width, right_x)
+
+        if right_x <= left_x:
+            right_x = min(self.canvas_width, left_x + 1)
+            left_x = max(0, right_x - 1)
+
+        # Recompute stored center/half-width based on actual values after clamping
+        self.width_mode_center = (left_x + right_x) / 2.0
+        self.width_mode_half_width = (right_x - left_x) / 2.0
+
+        for mask in self.masks:
+            if len(mask.corners) != 4:
+                continue
+            mask.corners[0].move_to(left_x, mask.corners[0].y)
+            mask.corners[3].move_to(left_x, mask.corners[3].y)
+            mask.corners[1].move_to(right_x, mask.corners[1].y)
+            mask.corners[2].move_to(right_x, mask.corners[2].y)
+
+    def _get_width_handle_positions(self, image_height: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+        """Return the current screen positions of the width handles."""
+        if self.width_mode_center is None or self.width_mode_half_width is None:
+            center = self._compute_canvas_width() / 2.0
+            half_width = center
+        else:
+            center = self.width_mode_center
+            half_width = self.width_mode_half_width
+
+        mid_y = image_height // 2
+        left_x = int(round(center - half_width))
+        right_x = int(round(center + half_width))
+        return (left_x, mid_y), (right_x, mid_y)
+
+    def _draw_width_mode_controls(self, image: np.ndarray):
+        """Render width crop handles and helper visuals."""
+        h, w = image.shape[:2]
+        left_pos, right_pos = self._get_width_handle_positions(h)
+
+        # Vertical markers
+        cv2.line(image, (left_pos[0], 0), (left_pos[0], h), (255, 255, 255), 1)
+        cv2.line(image, (right_pos[0], 0), (right_pos[0], h), (255, 255, 255), 1)
+
+        # Handle circles
+        for pos in (left_pos, right_pos):
+            cv2.circle(image, pos, self.width_mode_handle_radius, (255, 255, 255), -1)
+            cv2.circle(image, pos, self.width_mode_handle_radius, (0, 0, 0), 2)
+
+        width_px = int(round(self.width_mode_half_width * 2)) if self.width_mode_half_width else 0
+        label = f"Width: {width_px}px"
+        cv2.putText(image, label, (left_pos[0] + 10, max(40, left_pos[1] - 40)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    def _find_width_handle_at_point(self, x: int, y: int) -> Optional[str]:
+        """Determine if a width handle was clicked."""
+        if self.width_mode_center is None or self.width_mode_half_width is None:
+            self._initialize_width_mode()
+
+        left_pos, right_pos = self._get_width_handle_positions(self.last_overlay_height)
+        # Use actual mouse coordinate for y; handles drawn at mid-screen so the
+        # approximation is acceptable for hit-testing.
+        if self._point_within_radius(x, y, left_pos):
+            return 'left'
+        if self._point_within_radius(x, y, right_pos):
+            return 'right'
+        return None
+
+    def _point_within_radius(self, x: int, y: int, center: Tuple[int, int]) -> bool:
+        dx = x - center[0]
+        dy = y - center[1]
+        return (dx * dx + dy * dy) <= (self.width_mode_handle_radius ** 2)
+
+    def _update_width_crop_from_drag(self, x: int):
+        """Update width crop while dragging one of the handles."""
+        if self.width_mode_center is None or self.active_width_handle is None:
+            return
+
+        x = max(0, min(x, self.canvas_width))
+        if self.active_width_handle == 'left':
+            new_half = self.width_mode_center - x
+        else:
+            new_half = x - self.width_mode_center
+
+        max_half = min(self.width_mode_center, self.canvas_width - self.width_mode_center)
+        if max_half <= 0:
+            return
+        min_half = min(self.width_mode_min_width / 2.0, max_half)
+        new_half = max(min(new_half, max_half), min_half)
+
+        self.width_mode_half_width = new_half
+        self._apply_width_crop_to_masks()
 
 # Test functions for Stage 2 verification
 def test_mask_manager():
